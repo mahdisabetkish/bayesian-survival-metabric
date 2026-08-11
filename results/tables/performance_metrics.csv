@@ -1,0 +1,4 @@
+model,n,cindex,cindex_ci_low,cindex_ci_high,auc_5y,dcal_p_value,referral_gain
+Clinical Cox baseline,,0.6741,0.6581,0.6911,0.7065,0.9472,
+Bayesian MLP (MC Dropout),,0.6453,0.628,0.6617,0.6863,0.8823,
++ Uncertainty referral (top 20% deferred),1584,0.6591,0.6398,0.6775,0.6968,,0.0136

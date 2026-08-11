@@ -1,0 +1,22 @@
+name: metabric-survival
+channels:
+  - conda-forge
+  - sebp
+dependencies:
+  - python=3.11
+  - numpy>=1.24,<2.0
+  - pandas>=2.0
+  - scipy>=1.10
+  - scikit-learn>=1.3
+  - scikit-survival>=0.22
+  - lifelines>=0.27
+  - pytorch>=2.0
+  - shap>=0.44
+  - matplotlib>=3.6
+  - seaborn>=0.12
+  - tqdm>=4.65
+  - jupyter>=1.0
+  - nbconvert>=7.0
+  - pip
+  - pip:
+      - loguru>=0.7
