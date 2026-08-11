@@ -115,7 +115,7 @@ grid search on the **inner validation** C-index only — never on held-out test 
 ## Reproducing
 
 ```bash
-git clone <this repo> && cd metabric-bayesian-survival
+git clone <this repo> && bayesian-survival-metabric
 conda env create -f environment.yml && conda activate metabric-survival   # or: pip install -r requirements.txt
 bash run_all.sh
 ```
