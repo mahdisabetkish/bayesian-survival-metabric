@@ -1,0 +1,28 @@
+# Data — downloaded on demand via data/download.sh, never versioned
+data/*
+!data/download.sh
+
+# Logs — keep the directory, drop its contents
+logs/*
+!logs/.gitkeep
+
+# Model checkpoints
+# checkpoints/
+# *.pt
+*.pth
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
