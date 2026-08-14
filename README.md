@@ -1,4 +1,4 @@
-# 🧬🔬 Bayesian Deep Survival Modelling on METABRIC
+# Bayesian Deep Survival Modelling on METABRIC
 
 **A Monte-Carlo-dropout survival network for breast cancer that reports how much it trusts each prediction — and an honest account of what that uncertainty is, and is not, good for.**
 
@@ -25,9 +25,9 @@ fold, so no held-out patient influences anything that touches them.
 
 | Model | C-index (95% CI) | 5-yr AUC | D-calibration *p* | Referral gain |
 |---|---|---|---|---|
-| ✅ Clinical Cox baseline (12 covariates) | **0.674** (0.658–0.691) | **0.707** | 0.947 | — |
-| 📉 Bayesian MLP, 1,000 genes + clinical | 0.645 (0.628–0.662) | 0.686 | 0.882 | — |
-| ↗️ &nbsp;&nbsp;+ uncertainty referral (top 20 % deferred) | 0.659 (0.640–0.678) | 0.697 | — | **+0.014** |
+|  Clinical Cox baseline (12 covariates) | **0.674** (0.658–0.691) | **0.707** | 0.947 | — |
+|  Bayesian MLP, 1,000 genes + clinical | 0.645 (0.628–0.662) | 0.686 | 0.882 | — |
+|  &nbsp;&nbsp;+ uncertainty referral (top 20 % deferred) | 0.659 (0.640–0.678) | 0.697 | — | **+0.014** |
 
 Three findings, stated plainly:
 
