@@ -15,11 +15,13 @@ from pathlib import Path
 
 import pandas as pd
 
+from src.coxnet_baseline import comparison_table, run_coxnet_cv
 from src.data_loader import load_metabric
 from src.train import TrainConfig, configure_logging, run_cross_validation
 from src.uncertainty import evaluate, performance_table
 
 COMPARED_COLUMNS = ["cindex", "auc_5y"]
+COXNET_ROW = "CoxNet, 1,000 genes + clinical"
 
 
 def main() -> int:
@@ -41,19 +43,32 @@ def main() -> int:
     data = load_metabric(args.data_dir)
     oof, _ = run_cross_validation(data, TrainConfig())
     fresh = performance_table(evaluate(oof)).set_index("model")
+    checks = [
+        (model, column, float(reference.loc[model, column]), float(fresh.loc[model, column]))
+        for model in reference.index
+        for column in COMPARED_COLUMNS
+    ]
+
+    comparison_path = Path(args.results_dir) / "tables" / "model_comparison.csv"
+    if comparison_path.exists():
+        print("Refitting the CoxNet baseline...")
+        committed = pd.read_csv(comparison_path).set_index("model")
+        coxnet_oof, _ = run_coxnet_cv(data, TrainConfig())
+        current = comparison_table(coxnet_oof, oof).set_index("model")
+        checks += [
+            (COXNET_ROW, column, float(committed.loc[COXNET_ROW, column]), float(current.loc[COXNET_ROW, column]))
+            for column in COMPARED_COLUMNS
+        ]
 
     ok = True
     print(f"\n{'model':<44}{'metric':<10}{'committed':>11}{'fresh':>10}{'delta':>10}")
     print("-" * 85)
-    for model in reference.index:
-        for column in COMPARED_COLUMNS:
-            expected = float(reference.loc[model, column])
-            actual = float(fresh.loc[model, column])
-            delta = actual - expected
-            flag = "" if abs(delta) <= args.tolerance else "  <-- DRIFT"
-            if flag:
-                ok = False
-            print(f"{model:<44}{column:<10}{expected:>11.4f}{actual:>10.4f}{delta:>+10.4f}{flag}")
+    for model, column, expected, actual in checks:
+        delta = actual - expected
+        flag = "" if abs(delta) <= args.tolerance else "  <-- DRIFT"
+        if flag:
+            ok = False
+        print(f"{model:<44}{column:<10}{expected:>11.4f}{actual:>10.4f}{delta:>+10.4f}{flag}")
 
     print("-" * 85)
     print(

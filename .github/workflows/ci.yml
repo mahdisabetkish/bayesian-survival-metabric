@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies (CPU-only PyTorch)
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt pytest
+
+      - name: Unit tests on synthetic cohorts
+        run: python -m pytest -q
+
+  reproducibility:
+    # Downloads METABRIC (~500 MB), retrains all five folds and the CoxNet
+    # baseline, and diffs the headline metrics against the committed tables.
+    # Takes ~20 minutes, so it runs only when started by hand from the
+    # Actions tab.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies (CPU-only PyTorch)
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
+
+      - name: Cache the METABRIC archive
+        uses: actions/cache@v4
+        with:
+          path: data/brca_metabric.tar.gz
+          key: metabric-archive-v1
+
+      - name: Fetch METABRIC
+        run: bash data/download.sh
+
+      - name: Retrain and compare against committed results
+        run: python check_reproducibility.py

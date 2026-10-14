@@ -1,0 +1,4 @@
+model,cindex,cindex_ci_low,cindex_ci_high,cindex_fold_mean,cindex_fold_sd,auc_5y,dcal_p_value,coxnet_minus_clinical_cox,coxnet_minus_mlp
+Clinical Cox baseline (12 covariates),0.6741,0.6581,0.6911,0.6742,0.0118,0.7065,0.9472,,
+"CoxNet, 1,000 genes + clinical",0.6787,0.6633,0.6936,0.6794,0.0098,0.7128,0.9752,+0.0046 (-0.0019 to +0.0115),+0.0334 (+0.0195 to +0.0477)
+"Bayesian MLP, 1,000 genes + clinical",0.6453,0.628,0.6617,0.6455,0.0237,0.6863,0.8823,,

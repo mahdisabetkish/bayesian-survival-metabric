@@ -2,6 +2,7 @@
 
 **A Monte-Carlo-dropout survival network for breast cancer that reports how much it trusts each prediction — and an honest account of what that uncertainty is, and is not, good for.**
 
+[![CI](https://github.com/mahdisabetkish/bayesian-survival-metabric/actions/workflows/ci.yml/badge.svg)](https://github.com/mahdisabetkish/bayesian-survival-metabric/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Reproducible](https://img.shields.io/badge/reproducible-bash%20run__all.sh-success.svg)](run_all.sh)
@@ -25,22 +26,30 @@ fold, so no held-out patient influences anything that touches them.
 
 | Model | C-index (95% CI) | 5-yr AUC | D-calibration *p* | Referral gain |
 |---|---|---|---|---|
-|  Clinical Cox baseline (12 covariates) | **0.674** (0.658–0.691) | **0.707** | 0.947 | — |
+|  Clinical Cox baseline (12 covariates) | 0.674 (0.658–0.691) | 0.707 | 0.947 | — |
+|  CoxNet (elastic-net Cox), 1,000 genes + clinical | **0.679** (0.663–0.694) | **0.713** | 0.975 | — |
 |  Bayesian MLP, 1,000 genes + clinical | 0.645 (0.628–0.662) | 0.686 | 0.882 | — |
 |  &nbsp;&nbsp;+ uncertainty referral (top 20 % deferred) | 0.659 (0.640–0.678) | 0.697 | — | **+0.014** |
 
-Three findings, stated plainly:
+Four findings, stated plainly:
 
 1. **Transcriptome-wide deep learning did not beat a 12-variable clinical Cox model** for overall
    survival on this cohort (0.645 vs 0.674). The clinical model wins in all five folds. Age, Nottingham
    prognostic index, nodal status and tumour size dominate the SHAP ranking; the best gene ranks 8th.
-2. **Raw MC-dropout variance is not a usable confidence signal.** It correlates with prediction
+2. **A linear model given the same inputs does better than the network.** An elastic-net Cox model
+   trained on exactly the network's features, folds, training patients and validation split reaches
+   0.679 and beats the MLP in every fold (paired bootstrap difference +0.033, 95% CI +0.020 to
+   +0.048). Its calibration slopes (0.51–1.21) are also much closer to 1. Against the clinical model
+   it is level rather than better (+0.005, CI −0.002 to +0.012). The network's shortfall comes from
+   how it fits the genes, not from the genes themselves, but on overall survival the genes add
+   little beyond the clinical covariates whichever model uses them.
+3. **Raw MC-dropout variance is not a usable confidence signal.** It correlates with prediction
    *magnitude* (r = 0.48 with |risk|), not with difficulty — so deferring the "most uncertain"
    patients strips out the easy-to-rank extremes and makes accuracy **worse** (0.645 → 0.623 at a
    20 % referral rate).
    Regressing the risk score out of σ fixes this, and referral then behaves as selective prediction
    predicts.
-3. **The network's risk scores are badly over-dispersed.** The fitted van Houwelingen calibration
+4. **The network's risk scores are badly over-dispersed.** The fitted van Houwelingen calibration
    slopes are 0.20–0.51 per fold (a well-specified model gives ≈ 1; the Cox comparator gives
    0.94–1.53). Without that shrinkage the survival probabilities fail D-calibration outright
    (χ² = 252, *p* < 10⁻¹⁵); with it they pass (*p* = 0.88).
@@ -112,6 +121,15 @@ transcriptome adds. Ablating it costs ~0.007 validation C-index.
 Hyperparameters (1,000 genes, hidden 256→64, dropout 0.5, lr 1e-3, weight decay 1e-3) were chosen by
 grid search on the **inner validation** C-index only — never on held-out test folds.
 
+**The CoxNet comparator** (`src/coxnet_baseline.py`) reuses the network's fold-local preprocessing,
+so it sees the same 1,000 genes and 12 clinical covariates in each fold. Only the gene coefficients
+are penalised; the clinical ones are left free, matching the network's undropped clinical term. The
+elastic-net mix (0.1, 0.5 or 0.9) and the penalty strength (a 30-step path) are picked on the same
+inner validation split the network uses for early stopping, and the calibration split is handled
+exactly as for the other two models. Depending on the fold it keeps between 13 and 224 genes.
+Differences between models are tested with a paired bootstrap over patients, since all three are
+scored on the same people.
+
 ## Reproducing
 
 ```bash
@@ -121,25 +139,34 @@ bash run_all.sh
 ```
 
 `run_all.sh` downloads METABRIC from the cBioPortal Data Hub (~500 MB), runs the cross-validated
-training, and writes every figure and table. It takes about 15 minutes on four CPU cores; no GPU is
-required. Results land in `results/`, a training log is written to the console and can be redirected to a file if desired.
+training and the CoxNet baseline, and writes every figure and table. It takes about 15 minutes on
+four CPU cores, plus about three minutes for CoxNet; no GPU is required. Results land in `results/`,
+a training log is written to the console and can be redirected to a file if desired.
 
 To rerun only the analysis on existing predictions:
 
 ```bash
 python -m src.train                 # writes results/oof_predictions.csv
+python -m src.coxnet_baseline       # CoxNet on the same folds, writes results/tables/model_comparison.csv
 python -m src.visualize             # figures + tables from that file
 python -m src.visualize --skip-shap # skip the final-model refit
 ```
 
 Training is seeded and reproduces bit-for-bit on CPU. `python check_reproducibility.py` retrains from
 scratch and diffs the headline metrics against the committed
-`results/tables/performance_metrics.csv`, which is the quickest way to confirm a change to `src/`
-has not moved the numbers in this README.
+`results/tables/performance_metrics.csv` and `results/tables/model_comparison.csv`, which is the
+quickest way to confirm a change to `src/` has not moved the numbers in this README.
+
+`python -m pytest` runs the unit tests in under a minute. They use small synthetic cohorts with a
+planted signal, so they need no download, and they check the metrics against cases with a known
+answer, that preprocessing never looks at held-out patients, and that CoxNet and the network are
+scored on identical folds. GitHub Actions runs them on every push. The full retrain-and-compare check
+takes about 20 minutes, so it runs only when started by hand from the Actions tab.
 
 ## Layout
 
 ```
+├── .github/workflows/ci.yml     unit tests on every push; full reproducibility check on demand
 ├── checkpoints/                 trained model weights (5 folds)
 ├── check_reproducibility.py     verify results match committed tables
 ├── data/
@@ -153,8 +180,10 @@ has not moved the numbers in this README.
 │   ├── data_loader.py           parsing, alignment, fold‑local selection and scaling
 │   ├── model.py                 Bayesian MLP, Cox loss, Breslow baseline hazard
 │   ├── train.py                 cross‑validation, calibration, out‑of‑fold predictions
+│   ├── coxnet_baseline.py       elastic-net Cox on the same folds and features
 │   ├── uncertainty.py           C‑index, IPCW AUC/Brier, D‑calibration, referral
 │   └── visualize.py             figures and result tables
+├── tests/                       unit tests on synthetic cohorts
 ├── notebooks/01_bayesian_survival_analysis.ipynb
 ├── results/
 │   ├── figures/                 publication figures (300 dpi)
