@@ -26,7 +26,7 @@ from loguru import logger
 from sklearn.model_selection import StratifiedKFold, train_test_split
 from tqdm import tqdm
 
-from .data_loader import FoldPreprocessor, METABRICData, load_metabric
+from .data_loader import ENDPOINTS, FoldPreprocessor, METABRICData, load_metabric
 from .model import (
     BayesianMLP,
     BreslowBaseline,
@@ -75,6 +75,11 @@ class FoldResult:
     history: list[dict] = field(default_factory=list)
 
 
+def endpoint_dir(base: str | Path, endpoint: str) -> Path:
+    """Output folder for an endpoint. OS keeps the original paths; others get a subfolder."""
+    return Path(base) if endpoint == "os" else Path(base) / endpoint
+
+
 def configure_logging(log_file: Path, verbose: bool = True) -> None:
     logger.remove()
     if verbose:
@@ -88,7 +93,7 @@ def configure_logging(log_file: Path, verbose: bool = True) -> None:
     )
 
 
-def log_environment(cfg: TrainConfig, data: METABRICData) -> None:
+def log_environment(cfg: TrainConfig, data: METABRICData, endpoint: str = "os") -> None:
     logger.info("=" * 72)
     logger.info("METABRIC Bayesian survival model — cross-validated training run")
     logger.info("=" * 72)
@@ -99,8 +104,9 @@ def log_environment(cfg: TrainConfig, data: METABRICData) -> None:
         f"cohort      : {data.n_samples} patients, {data.expression.shape[1]} genes, "
         f"{data.clinical.shape[1]} clinical covariates"
     )
+    logger.info(f"endpoint    : {endpoint} ({', '.join(ENDPOINTS[endpoint])})")
     logger.info(
-        f"events      : {int(data.event.sum())} deaths "
+        f"events      : {int(data.event.sum())} "
         f"({100 * data.event.mean():.1f}%), median follow-up "
         f"{np.median(data.time):.1f} months"
     )
@@ -504,9 +510,13 @@ def fit_final_model(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train the Bayesian survival model on METABRIC.")
     parser.add_argument("--data-dir", default="data/brca_metabric")
-    parser.add_argument("--results-dir", default="results")
-    parser.add_argument("--log-file", default="logs/training.log")
-    parser.add_argument("--checkpoint-dir", default="checkpoints")
+    parser.add_argument(
+        "--endpoint", choices=sorted(ENDPOINTS), default="os",
+        help="os = overall survival (default), rfs = relapse-free survival",
+    )
+    parser.add_argument("--results-dir", help="default: results, or results/<endpoint>")
+    parser.add_argument("--log-file", help="default: logs/training.log, or logs/<endpoint>/")
+    parser.add_argument("--checkpoint-dir", help="default: checkpoints, or checkpoints/<endpoint>")
     parser.add_argument("--n-genes", type=int, default=TrainConfig.n_genes)
     parser.add_argument("--dropout", type=float, default=TrainConfig.dropout)
     parser.add_argument("--max-epochs", type=int, default=TrainConfig.max_epochs)
@@ -525,13 +535,15 @@ def main() -> None:
         seed=args.seed,
     )
 
-    configure_logging(Path(args.log_file), verbose=not args.quiet)
-    data = load_metabric(args.data_dir)
-    log_environment(cfg, data)
+    log_file = args.log_file or endpoint_dir("logs", args.endpoint) / "training.log"
+    configure_logging(Path(log_file), verbose=not args.quiet)
+    data = load_metabric(args.data_dir, endpoint=args.endpoint)
+    log_environment(cfg, data, args.endpoint)
 
-    oof, folds = run_cross_validation(data, cfg, checkpoint_dir=Path(args.checkpoint_dir))
+    checkpoint_dir = args.checkpoint_dir or endpoint_dir("checkpoints", args.endpoint)
+    oof, folds = run_cross_validation(data, cfg, checkpoint_dir=Path(checkpoint_dir))
 
-    results_dir = Path(args.results_dir)
+    results_dir = Path(args.results_dir or endpoint_dir("results", args.endpoint))
     (results_dir / "tables").mkdir(parents=True, exist_ok=True)
     oof.to_csv(results_dir / "oof_predictions.csv")
 
@@ -548,7 +560,8 @@ def main() -> None:
         ]
     )
     fold_table.to_csv(results_dir / "tables" / "fold_metrics.csv", index=False)
-    (results_dir / "run_config.json").write_text(json.dumps(cfg.as_dict(), indent=2))
+    run_config = {"endpoint": args.endpoint, **cfg.as_dict()}
+    (results_dir / "run_config.json").write_text(json.dumps(run_config, indent=2))
     logger.info(f"out-of-fold predictions written to {results_dir / 'oof_predictions.csv'}")
 
 

@@ -28,9 +28,9 @@ jobs:
 
   reproducibility:
     # Downloads METABRIC (~500 MB), retrains all five folds and the CoxNet
-    # baseline, and diffs the headline metrics against the committed tables.
-    # Takes ~20 minutes, so it runs only when started by hand from the
-    # Actions tab.
+    # baseline for overall and relapse-free survival, and diffs the headline
+    # metrics against the committed tables. Takes ~40 minutes, so it runs only
+    # when started by hand from the Actions tab.
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 90

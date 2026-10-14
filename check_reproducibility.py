@@ -1,10 +1,11 @@
 """Verify that a fresh run reproduces the committed results.
 
 Retrains from scratch and compares the headline metrics against
-``results/tables/performance_metrics.csv``. Run after changing anything in
+``results/tables/performance_metrics.csv`` and the model comparison tables
+for overall and relapse-free survival. Run after changing anything in
 ``src/`` to confirm the numbers in the README still hold.
 
-    python check_reproducibility.py [--tolerance 0.002]
+    python check_reproducibility.py [--tolerance 0.002] [--skip-rfs]
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ import pandas as pd
 
 from src.coxnet_baseline import comparison_table, run_coxnet_cv
 from src.data_loader import load_metabric
-from src.train import TrainConfig, configure_logging, run_cross_validation
+from src.train import TrainConfig, configure_logging, endpoint_dir, run_cross_validation
 from src.uncertainty import evaluate, performance_table
 
 COMPARED_COLUMNS = ["cindex", "auc_5y"]
@@ -29,6 +30,7 @@ def main() -> int:
     parser.add_argument("--data-dir", default="data/brca_metabric")
     parser.add_argument("--results-dir", default="results")
     parser.add_argument("--tolerance", type=float, default=0.002)
+    parser.add_argument("--skip-rfs", action="store_true", help="check overall survival only")
     args = parser.parse_args()
 
     reference_path = Path(args.results_dir) / "tables" / "performance_metrics.csv"
@@ -60,17 +62,31 @@ def main() -> int:
             for column in COMPARED_COLUMNS
         ]
 
+    rfs_path = endpoint_dir(args.results_dir, "rfs") / "tables" / "model_comparison.csv"
+    if rfs_path.exists() and not args.skip_rfs:
+        print("Retraining all three models on relapse-free survival...")
+        committed = pd.read_csv(rfs_path).set_index("model")
+        rfs = load_metabric(args.data_dir, endpoint="rfs")
+        rfs_oof, _ = run_cross_validation(rfs, TrainConfig())
+        rfs_coxnet, _ = run_coxnet_cv(rfs, TrainConfig())
+        current = comparison_table(rfs_coxnet, rfs_oof).set_index("model")
+        checks += [
+            (f"[RFS] {model}", column, float(committed.loc[model, column]), float(current.loc[model, column]))
+            for model in committed.index
+            for column in COMPARED_COLUMNS
+        ]
+
     ok = True
-    print(f"\n{'model':<44}{'metric':<10}{'committed':>11}{'fresh':>10}{'delta':>10}")
-    print("-" * 85)
+    print(f"\n{'model':<50}{'metric':<10}{'committed':>11}{'fresh':>10}{'delta':>10}")
+    print("-" * 91)
     for model, column, expected, actual in checks:
         delta = actual - expected
         flag = "" if abs(delta) <= args.tolerance else "  <-- DRIFT"
         if flag:
             ok = False
-        print(f"{model:<44}{column:<10}{expected:>11.4f}{actual:>10.4f}{delta:>+10.4f}{flag}")
+        print(f"{model:<50}{column:<10}{expected:>11.4f}{actual:>10.4f}{delta:>+10.4f}{flag}")
 
-    print("-" * 85)
+    print("-" * 91)
     print(
         f"\n{'PASS' if ok else 'FAIL'}: results reproduce within "
         f"{args.tolerance:.4f}" if ok else

@@ -40,6 +40,15 @@ BINARY_CLINICAL = {
     "INFERRED_MENOPAUSAL_STATE": ("Post", "POST_MENOPAUSAL"),
 }
 
+# Survival endpoints in the cBioPortal clinical file: (time column, status
+# column). Status values start with "1:" for an event and "0:" for censored.
+# For RFS the event is relapse; patients who died of other causes without
+# relapsing are censored at death.
+ENDPOINTS = {
+    "os": ("OS_MONTHS", "OS_STATUS"),
+    "rfs": ("RFS_MONTHS", "RFS_STATUS"),
+}
+
 
 @dataclass
 class METABRICData:
@@ -47,8 +56,8 @@ class METABRICData:
 
     expression: pd.DataFrame  # samples x genes, log2 microarray intensities
     clinical: pd.DataFrame  # samples x clinical covariates (raw, unscaled)
-    time: np.ndarray  # overall survival, months
-    event: np.ndarray  # 1 = death, 0 = censored
+    time: np.ndarray  # follow-up for the chosen endpoint, months
+    event: np.ndarray  # 1 = event (death for OS, relapse for RFS), 0 = censored
     sample_ids: np.ndarray
 
     @property
@@ -168,8 +177,12 @@ def load_metabric(
     data_dir: str | Path,
     min_followup_months: float = 0.1,
     use_cache: bool = True,
+    endpoint: str = "os",
 ) -> METABRICData:
-    """Load METABRIC and align expression, clinical and overall-survival tables.
+    """Load METABRIC and align expression, clinical and survival tables.
+
+    ``endpoint`` is ``"os"`` (overall survival, the default) or ``"rfs"``
+    (relapse-free survival).
 
     Patients without expression data, without a follow-up time, or with a
     non-positive follow-up time are dropped — the last group cannot contribute
@@ -178,8 +191,13 @@ def load_metabric(
     Parsing the 20k x 2k microarray text file takes about a minute, so the
     aligned tables are cached alongside the raw study.
     """
+    if endpoint not in ENDPOINTS:
+        raise ValueError(f"unknown endpoint {endpoint!r}; expected one of {sorted(ENDPOINTS)}")
+    time_col, status_col = ENDPOINTS[endpoint]
+
     data_dir = Path(data_dir)
-    cache_file = data_dir.parent / "cache" / "metabric_aligned.npz"
+    suffix = "" if endpoint == "os" else f"_{endpoint}"
+    cache_file = data_dir.parent / "cache" / f"metabric_aligned{suffix}.npz"
     if use_cache:
         cached = _cache_load(cache_file)
         if cached is not None:
@@ -197,8 +215,8 @@ def load_metabric(
     clinical = clinical.loc[shared]
     expression = expression.loc[shared]
 
-    time = pd.to_numeric(clinical["OS_MONTHS"], errors="coerce")
-    status = clinical["OS_STATUS"].astype("string")
+    time = pd.to_numeric(clinical[time_col], errors="coerce")
+    status = clinical[status_col].astype("string")
     event = status.str.startswith("1").astype("float")
     event = event.where(status.notna(), np.nan)
 

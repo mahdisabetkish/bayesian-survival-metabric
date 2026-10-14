@@ -22,7 +22,7 @@ Everything is evaluated out-of-fold across 5-fold stratified cross-validation. G
 scaling, the network, the baseline hazard and the Cox comparator are **all** refitted inside each
 fold, so no held-out patient influences anything that touches them.
 
-## Headline results
+## Headline results (overall survival)
 
 | Model | C-index (95% CI) | 5-yr AUC | D-calibration *p* | Referral gain |
 |---|---|---|---|---|
@@ -42,7 +42,8 @@ Four findings, stated plainly:
    +0.048). Its calibration slopes (0.51–1.21) are also much closer to 1. Against the clinical model
    it is level rather than better (+0.005, CI −0.002 to +0.012). The network's shortfall comes from
    how it fits the genes, not from the genes themselves, but on overall survival the genes add
-   little beyond the clinical covariates whichever model uses them.
+   little beyond the clinical covariates whichever model uses them. Relapse-free survival gives a
+   different answer ([below](#relapse-free-survival)).
 3. **Raw MC-dropout variance is not a usable confidence signal.** It correlates with prediction
    *magnitude* (r = 0.48 with |risk|), not with difficulty — so deferring the "most uncertain"
    patients strips out the easy-to-rank extremes and makes accuracy **worse** (0.645 → 0.623 at a
@@ -53,6 +54,29 @@ Four findings, stated plainly:
    slopes are 0.20–0.51 per fold (a well-specified model gives ≈ 1; the Cox comparator gives
    0.94–1.53). Without that shrinkage the survival probabilities fail D-calibration outright
    (χ² = 252, *p* < 10⁻¹⁵); with it they pass (*p* = 0.88).
+
+## Relapse-free survival
+
+Overall survival in METABRIC depends heavily on age and on deaths from other causes, which suits
+the clinical covariates. Relapse-free survival is a more direct test of what the tumour
+transcriptome carries. The event here is relapse or death from breast cancer; patients who died of
+other causes without relapsing are censored at death, as coded in cBioPortal. That leaves 1,975
+patients and 800 events. All three models were rerun unchanged: same features, same fold and
+calibration procedure, and the network keeps the hyperparameters tuned for overall survival.
+
+| Model | C-index (95% CI) | Per-fold mean ± SD | 5-yr AUC | D-calibration *p* |
+|---|---|---|---|---|
+|  Clinical Cox baseline (12 covariates) | 0.658 (0.638–0.677) | 0.658 ± 0.022 | 0.711 | 0.803 |
+|  CoxNet (elastic-net Cox), 1,000 genes + clinical | **0.677** (0.658–0.696) | 0.678 ± 0.025 | **0.738** | 0.595 |
+|  Bayesian MLP, 1,000 genes + clinical | 0.657 (0.637–0.676) | 0.658 ± 0.018 | 0.710 | 0.266 |
+
+On this endpoint the genes do add something, but only the linear model gets it out. CoxNet beats
+the clinical model by +0.020 (paired bootstrap 95% CI +0.007 to +0.030) and wins in all five folds,
+keeping 56 to 189 genes per fold. Its 5-year AUC goes from 0.711 to 0.738. The network is level
+with the clinical model (−0.001, CI −0.020 to +0.018), where on overall survival it was 0.029
+behind, and it trails CoxNet by 0.020 (CI 0.005 to 0.035). Its calibration slopes (0.36–0.61) are
+still well below 1. The CoxNet gain is small and comes from one cohort, so it needs checking on
+external data before much weight goes on it.
 
 ## Figures
 
@@ -139,8 +163,9 @@ bash run_all.sh
 ```
 
 `run_all.sh` downloads METABRIC from the cBioPortal Data Hub (~500 MB), runs the cross-validated
-training and the CoxNet baseline, and writes every figure and table. It takes about 15 minutes on
-four CPU cores, plus about three minutes for CoxNet; no GPU is required. Results land in `results/`,
+training and the CoxNet baseline, and writes every figure and table. It then repeats the network
+and CoxNet on relapse-free survival. It takes about 15 minutes on four CPU cores, plus about three
+minutes for CoxNet and five for the relapse-free runs; no GPU is required. Results land in `results/`,
 a training log is written to the console and can be redirected to a file if desired.
 
 To rerun only the analysis on existing predictions:
@@ -150,24 +175,28 @@ python -m src.train                 # writes results/oof_predictions.csv
 python -m src.coxnet_baseline       # CoxNet on the same folds, writes results/tables/model_comparison.csv
 python -m src.visualize             # figures + tables from that file
 python -m src.visualize --skip-shap # skip the final-model refit
+
+python -m src.train --endpoint rfs            # relapse-free survival, written to results/rfs/
+python -m src.coxnet_baseline --endpoint rfs
 ```
 
 Training is seeded and reproduces bit-for-bit on CPU. `python check_reproducibility.py` retrains from
 scratch and diffs the headline metrics against the committed
-`results/tables/performance_metrics.csv` and `results/tables/model_comparison.csv`, which is the
-quickest way to confirm a change to `src/` has not moved the numbers in this README.
+`results/tables/performance_metrics.csv`, `results/tables/model_comparison.csv` and
+`results/rfs/tables/model_comparison.csv` (add `--skip-rfs` to check overall survival only), which
+is the quickest way to confirm a change to `src/` has not moved the numbers in this README.
 
 `python -m pytest` runs the unit tests in under a minute. They use small synthetic cohorts with a
 planted signal, so they need no download, and they check the metrics against cases with a known
-answer, that preprocessing never looks at held-out patients, and that CoxNet and the network are
-scored on identical folds. GitHub Actions runs them on every push. The full retrain-and-compare check
+answer, that preprocessing never looks at held-out patients, that CoxNet and the network are
+scored on identical folds, and that the loader reads the right columns for each endpoint. GitHub Actions runs them on every push. The full retrain-and-compare check
 takes about 20 minutes, so it runs only when started by hand from the Actions tab.
 
 ## Layout
 
 ```
 ├── .github/workflows/ci.yml     unit tests on every push; full reproducibility check on demand
-├── checkpoints/                 trained model weights (5 folds)
+├── checkpoints/                 trained model weights (5 folds; rfs/ for relapse-free survival)
 ├── check_reproducibility.py     verify results match committed tables
 ├── data/
 │   ├── download.sh              fetch + unpack METABRIC from cBioPortal
@@ -187,7 +216,8 @@ takes about 20 minutes, so it runs only when started by hand from the Actions ta
 ├── notebooks/01_bayesian_survival_analysis.ipynb
 ├── results/
 │   ├── figures/                 publication figures (300 dpi)
-│   └── tables/                  metrics, gene ranking, referral curves
+│   ├── tables/                  metrics, gene ranking, referral curves
+│   └── rfs/                     predictions and tables for relapse-free survival
 └── run_all.sh
 ```
 
@@ -195,9 +225,9 @@ takes about 20 minutes, so it runs only when started by hand from the Actions ta
 
 Single cohort, no external validation — the calibration slopes below 0.5 say plainly that this
 network is over-fitting 1.3k training patients, and the honest expectation is that the gap to the
-clinical model would persist or widen elsewhere. Overall survival in METABRIC is heavily driven by
-age and competing mortality, which favours the clinical covariates; relapse-free survival (available
-in the same files) would be a fairer test of the transcriptome. The referral analysis assumes a
+clinical model would persist or widen elsewhere. The relapse-free survival runs reuse
+hyperparameters tuned for overall survival, which may leave the network slightly short there, and
+the uncertainty analysis has only been run on overall survival. The referral analysis assumes a
 clinician handles deferred patients better than the model, which is asserted here rather than
 measured.
 

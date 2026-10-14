@@ -29,9 +29,15 @@ from loguru import logger
 from sklearn.model_selection import StratifiedKFold, train_test_split
 from sksurv.linear_model import CoxnetSurvivalAnalysis
 
-from .data_loader import FoldPreprocessor, METABRICData, load_metabric
+from .data_loader import ENDPOINTS, FoldPreprocessor, METABRICData, load_metabric
 from .model import BreslowBaseline
-from .train import FIVE_YEARS_MONTHS, TrainConfig, configure_logging, fit_calibration_slope
+from .train import (
+    FIVE_YEARS_MONTHS,
+    TrainConfig,
+    configure_logging,
+    endpoint_dir,
+    fit_calibration_slope,
+)
 from .uncertainty import (
     bootstrap_cindex_ci,
     cumulative_dynamic_auc,
@@ -287,24 +293,30 @@ def comparison_table(coxnet_oof: pd.DataFrame, main_oof: pd.DataFrame, seed: int
 def main() -> None:
     parser = argparse.ArgumentParser(description="Cross-validated CoxNet baseline on METABRIC.")
     parser.add_argument("--data-dir", default="data/brca_metabric")
-    parser.add_argument("--results-dir", default="results")
-    parser.add_argument("--log-file", default="logs/coxnet.log")
+    parser.add_argument(
+        "--endpoint", choices=sorted(ENDPOINTS), default="os",
+        help="os = overall survival (default), rfs = relapse-free survival",
+    )
+    parser.add_argument("--results-dir", help="default: results, or results/<endpoint>")
+    parser.add_argument("--log-file", help="default: logs/coxnet.log, or logs/<endpoint>/")
     parser.add_argument("--n-genes", type=int, default=TrainConfig.n_genes)
     parser.add_argument("--seed", type=int, default=TrainConfig.seed)
     parser.add_argument("--quiet", action="store_true")
     args = parser.parse_args()
 
     cfg = TrainConfig(n_genes=args.n_genes, seed=args.seed)
-    configure_logging(Path(args.log_file), verbose=not args.quiet)
-    data = load_metabric(args.data_dir)
+    log_file = args.log_file or endpoint_dir("logs", args.endpoint) / "coxnet.log"
+    configure_logging(Path(log_file), verbose=not args.quiet)
+    data = load_metabric(args.data_dir, endpoint=args.endpoint)
     logger.info(
-        f"CoxNet baseline | {data.n_samples} patients | {cfg.n_genes} genes per fold + "
-        f"{data.clinical.shape[1]} clinical (unpenalised) | l1_ratio grid {L1_RATIOS}"
+        f"CoxNet baseline | endpoint {args.endpoint} | {data.n_samples} patients | "
+        f"{cfg.n_genes} genes per fold + {data.clinical.shape[1]} clinical (unpenalised) | "
+        f"l1_ratio grid {L1_RATIOS}"
     )
 
     oof, folds = run_coxnet_cv(data, cfg)
 
-    results_dir = Path(args.results_dir)
+    results_dir = Path(args.results_dir or endpoint_dir("results", args.endpoint))
     tables_dir = results_dir / "tables"
     tables_dir.mkdir(parents=True, exist_ok=True)
     oof.to_csv(results_dir / "coxnet_oof_predictions.csv")
@@ -314,7 +326,10 @@ def main() -> None:
 
     main_oof_path = results_dir / "oof_predictions.csv"
     if not main_oof_path.exists():
-        logger.warning(f"{main_oof_path} not found; run `python -m src.train` for the comparison table.")
+        logger.warning(
+            f"{main_oof_path} not found; run `python -m src.train --endpoint {args.endpoint}` "
+            "for the comparison table."
+        )
         return
     table = comparison_table(oof, pd.read_csv(main_oof_path, index_col="sample_id"))
     table.to_csv(tables_dir / "model_comparison.csv", index=False)
